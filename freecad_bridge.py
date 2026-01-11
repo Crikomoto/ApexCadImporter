@@ -11,6 +11,7 @@ import tempfile
 import json
 import threading
 import queue
+import time
 from pathlib import Path
 
 
@@ -226,6 +227,8 @@ except Exception as e:
         Returns:
             Dict with conversion results
         """
+        start_time = time.time()
+        
         # Validate input file
         if not os.path.exists(input_file):
             return {
@@ -233,19 +236,29 @@ except Exception as e:
                 'error': f"Input file not found: {input_file}"
             }
         
-        file_size = os.path.getsize(input_file) / (1024 * 1024)  # MB
-        print(f"ApexCad: Input file: {os.path.basename(input_file)} ({file_size:.2f} MB)")
+        file_size_mb = os.path.getsize(input_file) / (1024 * 1024)  # MB
+        file_size_kb = os.path.getsize(input_file) / 1024  # KB
+        print(f"\n{'='*60}")
+        print(f"ApexCad: INICIANDO CONVERSIÓN")
+        print(f"Archivo: {os.path.basename(input_file)}")
+        print(f"Tamaño: {file_size_kb:.1f} KB ({file_size_mb:.2f} MB)")
+        print(f"Tiempo: {time.strftime('%H:%M:%S')}")
+        print(f"{'='*60}\n")
         
         os.makedirs(output_dir, exist_ok=True)
         
         # Generate conversion script
+        script_start = time.time()
         script_path = self.generate_conversion_script(input_file, output_dir, options)
-        print(f"ApexCad: Generated script at {script_path}")
+        script_time = time.time() - script_start
+        print(f"[{script_time:.2f}s] Script generado: {script_path}")
         
         try:
             # Execute FreeCAD with platform-specific flags
-            print(f"ApexCad: Starting FreeCAD conversion...")
-            print(f"ApexCad: Command: {self.freecad_path} -c {script_path}")
+            exec_start = time.time()
+            print(f"\n[{time.time() - start_time:.2f}s] Ejecutando FreeCAD...")
+            print(f"Comando: {self.freecad_path} -c {script_path}")
+            print(f"Esperando respuesta (timeout: 60s para archivos <1MB)...\n")
             
             # Platform-specific flags to prevent window creation
             if os.name == 'nt':  # Windows
@@ -256,35 +269,44 @@ except Exception as e:
                 startupinfo = None
                 creation_flags = 0
             
+            # Dynamic timeout based on file size
+            timeout = 60 if file_size_mb < 1 else min(300, 60 + int(file_size_mb * 30))
+            
             result = subprocess.run(
                 [self.freecad_path, "-c", script_path],
                 capture_output=True,
                 text=True,
-                timeout=300,  # 5 minute timeout
+                timeout=timeout,
                 startupinfo=startupinfo,
                 creationflags=creation_flags
             )
             
-            print(f"ApexCad: FreeCAD finished with return code: {result.returncode}")
+            exec_time = time.time() - exec_start
+            print(f"\n[{time.time() - start_time:.2f}s] FreeCAD terminó en {exec_time:.2f}s")
+            print(f"Código de retorno: {result.returncode}")
             
             # Parse output
             output_lines = result.stdout.split('\n')
             
             # Print FreeCAD output for debugging
-            print("\n" + "="*50)
-            print("FreeCAD Output:")
-            print("="*50)
-            for line in output_lines[:20]:  # First 20 lines
+            print("\n" + "="*60)
+            print("SALIDA DE FREECAD:")
+            print("="*60)
+            for line in output_lines:
                 if line.strip():
                     print(f"  {line}")
-            if len(output_lines) > 20:
-                print(f"  ... ({len(output_lines) - 20} more lines)")
-            print("="*50 + "\n")
+            
+            if result.stderr.strip():
+                print("\nERRORES/ADVERTENCIAS:")
+                print("-"*60)
+                for line in result.stderr.split('\n'):
+                    if line.strip():
+                        print(f"  {line}")
+            print("="*60 + "\n")
             
             # Check for errors
             if result.returncode != 0:
-                print(f"ApexCad: ERROR - FreeCAD failed with code {result.returncode}")
-                print(f"ApexCad: STDERR: {result.stderr}")
+                print(f"\n❌ ERROR: FreeCAD falló con código {result.returncode}")
                 return {
                     'success': False,
                     'error': f"FreeCAD conversion failed (code {result.returncode}): {result.stderr}",
@@ -292,18 +314,45 @@ except Exception as e:
                 }
             
             # Load hierarchy data
+            load_start = time.time()
             hierarchy_file = os.path.join(output_dir, "hierarchy.json")
+            print(f"[{time.time() - start_time:.2f}s] Cargando datos de jerarquía...")
+            
             if os.path.exists(hierarchy_file):
                 with open(hierarchy_file, 'r') as f:
                     hierarchy_data = json.load(f)
+                
+                load_time = time.time() - load_start
+                total_time = time.time() - start_time
+                
+                num_objects = len(hierarchy_data.get('objects', []))
+                
+                print(f"[{total_time:.2f}s] ✓ Jerarquía cargada en {load_time:.2f}s")
+                print(f"\n{'='*60}")
+                print(f"✓ CONVERSIÓN COMPLETA")
+                print(f"Objetos procesados: {num_objects}")
+                print(f"Tiempo total: {total_time:.2f}s")
+                print(f"  - Generación script: {script_time:.2f}s")
+                print(f"  - Ejecución FreeCAD: {exec_time:.2f}s")
+                print(f"  - Carga jerarquía: {load_time:.2f}s")
+                print(f"{'='*60}\n")
                 
                 return {
                     'success': True,
                     'hierarchy': hierarchy_data,
                     'output_dir': output_dir,
-                    'output': result.stdout
+                    'output': result.stdout,
+                    'timing': {
+                        'total': total_time,
+                        'script_gen': script_time,
+                        'freecad_exec': exec_time,
+                        'load_hierarchy': load_time
+                    }
                 }
             else:
+                print(f"\n❌ ERROR: Archivo hierarchy.json no fue generado")
+                print(f"Directorio de salida: {output_dir}")
+                print(f"Archivos presentes: {os.listdir(output_dir)}")
                 return {
                     'success': False,
                     'error': "Hierarchy file not generated",
@@ -311,11 +360,17 @@ except Exception as e:
                 }
         
         except subprocess.TimeoutExpired:
+            elapsed = time.time() - start_time
+            print(f"\n❌ TIMEOUT después de {elapsed:.1f}s")
             return {
                 'success': False,
-                'error': "FreeCAD conversion timed out (>5 minutes)",
+                'error': f"FreeCAD conversion timed out after {elapsed:.1f}s",
             }
         except Exception as e:
+            elapsed = time.time() - start_time
+            print(f"\n❌ ERROR después de {elapsed:.1f}s: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {
                 'success': False,
                 'error': f"Conversion error: {str(e)}",
