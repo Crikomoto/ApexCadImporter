@@ -85,6 +85,7 @@ class CADImporter:
         
         # Import into Blender
         hierarchy = result['hierarchy']
+        options['filepath'] = filepath  # Store for source file reference
         success, message = self._import_hierarchy(hierarchy, options, output_dir)
         
         # Cleanup
@@ -120,11 +121,14 @@ class CADImporter:
         if hierarchy_mode == 'COLLECTION':
             main_collection = utils.get_collection(self.context, file_name)
             self.collection_map[file_name] = main_collection
-            root_parent = None
+            # Create root Empty in the collection
+            root_parent = utils.create_empty(file_name, collection=main_collection)
         else:  # EMPTY mode
-            root_parent = utils.create_empty(file_name, collection=self.context.scene.collection)
-            self.object_map[file_name] = root_parent
             main_collection = self.context.scene.collection
+            # Create root Empty in scene collection
+            root_parent = utils.create_empty(file_name, collection=main_collection)
+        
+        self.object_map[file_name] = root_parent
         
         # Build object map first (for parent references)
         for obj_data in objects_data:
@@ -141,29 +145,83 @@ class CADImporter:
             print(f"ApexCad: Processing chunk {chunk_idx+1}/{len(chunks)}")
             
             for obj_data in chunk:
-                self._import_object(obj_data, hierarchy_mode, main_collection, root_parent, output_dir, scale, y_up)
+                self._import_object(obj_data, hierarchy_mode, main_collection, root_parent, output_dir, scale, y_up, options)
         
         # Setup parent-child relationships
         print("ApexCad: Building hierarchy...")
+        print(f"ApexCad: object_map contains {len(self.object_map)} entries")
+        
+        # Debug: show assemblies in map
+        assemblies = {k: v for k, v in self.object_map.items() if v and v.type == 'EMPTY'}
+        if assemblies:
+            print(f"ApexCad: Found {len(assemblies)} assemblies:")
+            for internal_name, obj in list(assemblies.items())[:5]:
+                print(f"  - '{internal_name}' → {obj.name}")
+            if len(assemblies) > 5:
+                print(f"  ... and {len(assemblies) - 5} more")
+        
         for obj_data in objects_data:
             self._setup_parent_child(obj_data)
+        
+        # Reconstruct nested hierarchy from naming patterns
+        # STEP files imported by FreeCAD lose nested hierarchy
+        # We reconstruct it by matching name prefixes
+        print("ApexCad: Reconstructing nested hierarchy from names...")
+        self._reconstruct_hierarchy()
+        
+        # Detect and create instances for optimization
+        self._detect_and_create_instances()
         
         # Apply Y-up conversion if needed
         if y_up:
             print("ApexCad: Applying Y-up conversion...")
+            
+            # Rotate root assembly -180° on X axis for Y-up conversion
+            # FreeCAD uses Z-up, Blender uses Y-up
+            if root_parent and root_parent.type == 'EMPTY':
+                import math
+                root_parent.rotation_euler = (math.radians(-180), 0, 0)
+                print(f"  ↻ Root rotation: X=-180°")
+            
+            # Apply mesh conversion
             for obj in self.imported_objects:
                 if obj and obj.type == 'MESH':
                     utils.apply_y_up_conversion(obj)
         
         return True, "Import successful"
     
-    def _import_object(self, obj_data, hierarchy_mode, main_collection, root_parent, output_dir, scale, y_up):
+    def _import_object(self, obj_data, hierarchy_mode, main_collection, root_parent, output_dir, scale, y_up, options):
         """Import a single object"""
         internal_name = obj_data['internal_name']
         obj_name = utils.sanitize_name(obj_data['name'])
         mesh_file = obj_data.get('mesh_file')
         metadata = obj_data.get('metadata', {})
         transform = obj_data.get('transform', {})
+        obj_type = obj_data.get('type', '')
+        is_leaf = obj_data.get('is_leaf', True)
+        
+        # Create Empties for assemblies (containers without geometry)
+        if not mesh_file:
+            # For containers (assemblies), create an Empty
+            if not is_leaf:
+                # Assemblies are at origin since children have world coordinates
+                empty = utils.create_empty(
+                    obj_name,
+                    location=[0, 0, 0],
+                    parent=root_parent,
+                    collection=main_collection
+                )
+                
+                utils.set_custom_properties(empty, metadata)
+                self.object_map[internal_name] = empty
+                self.imported_objects.append(empty)
+                print(f"  ○ Assembly: {obj_name}")
+            else:
+                # Leaf without geometry (shouldn't happen after datum filtering)
+                print(f"  ⊘ Skipped: {obj_name} (no geometry)")
+                self.object_map[internal_name] = None
+                self.object_map[internal_name] = None
+            return
         
         # Get or create collection/parent for this object
         if hierarchy_mode == 'COLLECTION':
@@ -174,19 +232,20 @@ class CADImporter:
             obj_parent = root_parent
         
         # Import mesh if available
-        if mesh_file and os.path.exists(mesh_file):
-            location = transform.get('position', [0, 0, 0])
-            rotation_quat = transform.get('rotation', None)
+        if os.path.exists(mesh_file):
+            # NOTE: The OBJ file from FreeCAD already has transformations baked in
+            # (exported from obj.Shape which is in world space)
+            # So we import at origin and don't apply transforms
             
-            # Import OBJ file
+            # Import OBJ file with scale applied to geometry only
             imported_obj = utils.import_obj_file(
                 mesh_file,
                 obj_name,
-                location=location,
-                rotation_quat=rotation_quat,
+                location=[0, 0, 0],  # OBJ already in world space
+                rotation_quat=None,   # No additional rotation
                 parent=obj_parent,
                 collection=obj_collection,
-                scale=scale
+                scale=scale  # Only apply scale to vertices
             )
             
             if imported_obj:
@@ -195,6 +254,26 @@ class CADImporter:
                 
                 # Store original tessellation quality for re-tessellation
                 imported_obj['apexcad_original_file'] = obj_data.get('internal_name', '')
+                imported_obj['apexcad_source_file'] = options.get('filepath', '')
+                imported_obj['apexcad_tessellation'] = options.get('tessellation_quality', 0.01)
+                
+                # Apply smooth shading with auto smooth
+                utils.apply_smooth_shading(imported_obj, auto_smooth_angle=30)
+                
+                # Create and assign material if color information exists
+                if 'color' in metadata:
+                    color = metadata['color']
+                    mat_name = f"CAD_{obj_name}"
+                    material = utils.create_material_from_color(mat_name, color)
+                    
+                    # Assign material
+                    if imported_obj.data.materials:
+                        imported_obj.data.materials[0] = material
+                    else:
+                        imported_obj.data.materials.append(material)
+                
+                # Store mesh hash for instance detection
+                imported_obj['apexcad_mesh_hash'] = utils.mesh_hash(imported_obj.data)
                 imported_obj['apexcad_can_retessellate'] = True
                 
                 self.object_map[internal_name] = imported_obj
@@ -229,10 +308,156 @@ class CADImporter:
         child_obj = self.object_map.get(internal_name)
         parent_obj = self.object_map.get(parent_name)
         
+        if not child_obj:
+            # Object was skipped (reference plane, etc.)
+            return
+            
+        if not parent_obj:
+            print(f"  ⚠ Parent not found: {parent_name} (for {child_obj.name})")
+            return
+        
         if child_obj and parent_obj and child_obj != parent_obj:
-            # Only set parent if not already set
-            if not child_obj.parent:
+            # Solo parentear si no está ya parenteado
+            if not child_obj.parent or child_obj.parent != parent_obj:
                 child_obj.parent = parent_obj
+                child_obj.matrix_parent_inverse = parent_obj.matrix_world.inverted()
+                print(f"  ↳ Parented: {child_obj.name} → {parent_obj.name}")
+
+    def _reconstruct_hierarchy(self):
+        """Reconstruct nested hierarchy from name patterns
+        
+        STEP files imported by FreeCAD lose assembly Group relationships.
+        We reconstruct hierarchy by matching naming conventions:
+        - AMS-30-511-xxx belongs under AMS-30-513-000
+        - AMS-50-172-xxx belongs under AMS-50-172-000
+        """
+        # Find all assemblies (Empties)
+        assemblies = {}
+        for internal_name, obj in self.object_map.items():
+            if obj and obj.type == 'EMPTY':
+                # Remove .001 suffix to get clean name
+                clean_name = obj.name.rsplit('.', 1)[0] if '.' in obj.name else obj.name
+                assemblies[clean_name] = (internal_name, obj)
+        
+        if not assemblies:
+            print("ApexCad: No assemblies found for hierarchy reconstruction")
+            return
+        
+        print(f"ApexCad: Found {len(assemblies)} assemblies for matching:")
+        for name in list(assemblies.keys())[:5]:
+            print(f"  - {name}")
+        
+        reparented = 0
+        # Check all objects
+        for internal_name, obj in self.object_map.items():
+            if not obj or obj.type == 'EMPTY':  # Skip assemblies themselves
+                continue
+            
+            # Get clean object name
+            obj_clean = obj.name.rsplit('.', 1)[0] if '.' in obj.name else obj.name
+            
+            # Find best matching assembly (longest prefix match)
+            best_match = None
+            best_score = 0
+            
+            for asm_name, (asm_internal, asm_obj) in assemblies.items():
+                # Skip if it's the same object
+                if asm_obj == obj:
+                    continue
+                
+                # Check if object name starts with assembly name prefix
+                # Use hyphen-separated matching for CAD naming conventions
+                parts_obj = obj_clean.upper().split('-')
+                parts_asm = asm_name.upper().split('-')
+                
+                # Calculate matching score
+                score = 0
+                for i in range(min(len(parts_obj), len(parts_asm))):
+                    if parts_obj[i] == parts_asm[i]:
+                        # Exact match worth 2 points
+                        score += 2
+                    elif parts_obj[i].startswith(parts_asm[i][:2]) or parts_asm[i].startswith(parts_obj[i][:2]):
+                        # Partial match (first 2 chars) worth 1 point
+                        score += 1
+                    else:
+                        # Stop on first non-match
+                        break
+                
+                # Require minimum score of 4 (e.g., 2 exact matches)
+                # and make sure assembly name is different from object name
+                if score >= 4 and obj_clean.upper() != asm_name.upper() and score > best_score:
+                    best_match = asm_obj
+                    best_score = score
+            
+            # Reparent if we found a better match than current parent
+            if best_match and obj.parent != best_match:
+                old_parent = obj.parent.name if obj.parent else "None"
+                obj.parent = best_match
+                obj.matrix_parent_inverse = best_match.matrix_world.inverted()
+                reparented += 1
+                print(f"  ↻ {obj.name}: {old_parent} → {best_match.name}")
+        
+        if reparented > 0:
+            print(f"ApexCad: Reconstructed {reparented} relationships")
+        else:
+            print("ApexCad: No reparenting needed")
+    
+    def _detect_and_create_instances(self):
+        """
+        Detect identical meshes and convert to instances for optimization
+        
+        Returns:
+            Number of instances created
+        """
+        print("ApexCad: Detecting identical meshes for instancing...")
+        
+        # Group objects by mesh hash
+        mesh_groups = {}
+        
+        for obj in self.imported_objects:
+            if not obj or obj.type != 'MESH':
+                continue
+            
+            mesh_hash = obj.get('apexcad_mesh_hash')
+            if not mesh_hash:
+                continue
+            
+            if mesh_hash not in mesh_groups:
+                mesh_groups[mesh_hash] = []
+            mesh_groups[mesh_hash].append(obj)
+        
+        # Convert duplicates to instances
+        instances_created = 0
+        
+        for mesh_hash, objects in mesh_groups.items():
+            if len(objects) < 2:
+                continue
+            
+            # Use first object as reference
+            reference_obj = objects[0]
+            
+            # Verify meshes are actually identical (hash can have collisions)
+            identical_objects = [reference_obj]
+            
+            for obj in objects[1:]:
+                if utils.are_meshes_identical(reference_obj.data, obj.data):
+                    identical_objects.append(obj)
+            
+            # Convert to instances if we have duplicates
+            if len(identical_objects) >= 2:
+                print(f"  ⚡ Found {len(identical_objects)} instances of {reference_obj.name}")
+                
+                for obj in identical_objects[1:]:
+                    utils.convert_to_instance(obj, reference_obj)
+                    instances_created += 1
+        
+        if instances_created > 0:
+            print(f"ApexCad: Created {instances_created} instances")
+        else:
+            print("ApexCad: No duplicate meshes found")
+        
+        return instances_created
+
 
 
 def import_cad_file(context, filepath, scale=1.0, hierarchy_mode='COLLECTION', y_up=True, chunk_size=50, tessellation_quality=0.1):

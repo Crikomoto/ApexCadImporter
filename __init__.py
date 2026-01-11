@@ -48,6 +48,18 @@ modules = [
 ]
 
 
+def auto_detect_freecad_delayed():
+    """Auto-detect FreeCAD after registration is complete"""
+    try:
+        prefs = bpy.context.preferences.addons[__package__].preferences
+        if prefs.auto_detect_freecad and not prefs.freecad_path:
+            print("ApexCad: Auto-detecting FreeCAD installation...")
+            bpy.ops.apexcad.detect_freecad()
+    except Exception as e:
+        print(f"ApexCad: Auto-detect skipped - {e}")
+    return None
+
+
 def register():
     """Register all addon modules and classes"""
     # Register each module
@@ -58,14 +70,8 @@ def register():
     # Register file import menu
     bpy.types.TOPBAR_MT_file_import.append(ui.menu_func_import)
     
-    # Auto-detect FreeCAD on first registration
-    try:
-        prefs = bpy.context.preferences.addons[__package__].preferences
-        if prefs.auto_detect_freecad and not prefs.freecad_path:
-            print("ApexCad: Auto-detecting FreeCAD installation...")
-            bpy.ops.apexcad.detect_freecad()
-    except:
-        pass
+    # Auto-detect FreeCAD after a short delay (ensures preferences are ready)
+    bpy.app.timers.register(auto_detect_freecad_delayed, first_interval=0.1)
     
     print("ApexCadImporter: Successfully registered")
 

@@ -161,7 +161,8 @@ def create_empty(name, location=(0, 0, 0), rotation=(0, 0, 0), parent=None, coll
 
 def import_obj_file(filepath, obj_name, location=(0, 0, 0), rotation_quat=None, parent=None, collection=None, scale=1.0):
     """
-    Import OBJ file and setup object
+    Import OBJ file directly by parsing and creating mesh
+    This avoids issues with Blender's OBJ importer merging objects
     
     Args:
         filepath: Path to OBJ file
@@ -181,74 +182,79 @@ def import_obj_file(filepath, obj_name, location=(0, 0, 0), rotation_quat=None, 
         print(f"ApexCad: Warning - OBJ file not found: {filepath}")
         return None
     
-    # Store current objects
-    before_import = set(bpy.context.scene.objects)
+    # Parse OBJ file manually
+    vertices = []
+    faces = []
     
-    # Import OBJ
     try:
-        bpy.ops.wm.obj_import(filepath=filepath)
-    except:
-        # Fallback for older Blender versions
-        try:
-            bpy.ops.import_scene.obj(filepath=filepath)
-        except Exception as e:
-            print(f"ApexCad: Error importing OBJ: {e}")
+        with open(filepath, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                parts = line.split()
+                if not parts:
+                    continue
+                
+                if parts[0] == 'v':  # Vertex
+                    # OBJ format: v x y z - apply scale during parsing
+                    vertices.append((
+                        float(parts[1]) * scale, 
+                        float(parts[2]) * scale, 
+                        float(parts[3]) * scale
+                    ))
+                
+                elif parts[0] == 'f':  # Face
+                    # OBJ format: f v1 v2 v3 or f v1/vt1/vn1 v2/vt2/vn2 v3/vt3/vn3
+                    # We only need vertex indices (convert to 0-based)
+                    face_verts = []
+                    for vert in parts[1:]:
+                        # Split by / and take first element (vertex index)
+                        vert_idx = int(vert.split('/')[0]) - 1  # OBJ is 1-based
+                        face_verts.append(vert_idx)
+                    faces.append(face_verts)
+        
+        if not vertices:
+            print(f"ApexCad: No vertices in OBJ file: {filepath}")
             return None
-    
-    # Find newly imported objects
-    after_import = set(bpy.context.scene.objects)
-    new_objects = after_import - before_import
-    
-    if not new_objects:
-        print(f"ApexCad: No objects imported from {filepath}")
-        return None
-    
-    # Get the main imported object (usually first mesh)
-    imported_obj = None
-    for obj in new_objects:
-        if obj.type == 'MESH':
-            imported_obj = obj
-            break
-    
-    if not imported_obj and new_objects:
-        imported_obj = list(new_objects)[0]
-    
-    if imported_obj:
-        # Rename object
-        imported_obj.name = obj_name
-        if imported_obj.data:
-            imported_obj.data.name = obj_name
+        
+        # Create mesh
+        mesh = bpy.data.meshes.new(obj_name)
+        mesh.from_pydata(vertices, [], faces)
+        mesh.update()
+        
+        # Validate mesh
+        mesh.validate()
+        
+        # Create object
+        obj = bpy.data.objects.new(obj_name, mesh)
         
         # Apply transformations
-        imported_obj.location = location
+        obj.location = location
         
         if rotation_quat:
             q = Quaternion((rotation_quat[0], rotation_quat[1], rotation_quat[2], rotation_quat[3]))
-            imported_obj.rotation_mode = 'QUATERNION'
-            imported_obj.rotation_quaternion = q
-        
-        # Apply scale
-        if scale != 1.0:
-            imported_obj.scale = (scale, scale, scale)
+            obj.rotation_mode = 'QUATERNION'
+            obj.rotation_quaternion = q
         
         # Set parent
         if parent:
-            imported_obj.parent = parent
+            obj.parent = parent
         
-        # Move to collection
+        # Link to collection
         if collection:
-            # Remove from all collections
-            for coll in imported_obj.users_collection:
-                coll.objects.unlink(imported_obj)
-            # Link to target collection
-            collection.objects.link(imported_obj)
-    
-    # Clean up other imported objects (cameras, lights, etc.)
-    for obj in new_objects:
-        if obj != imported_obj:
-            bpy.data.objects.remove(obj, do_unlink=True)
-    
-    return imported_obj
+            collection.objects.link(obj)
+        else:
+            bpy.context.scene.collection.objects.link(obj)
+        
+        return obj
+        
+    except Exception as e:
+        print(f"ApexCad: Error parsing OBJ file {filepath}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 def calculate_bounds(objects):
@@ -292,3 +298,174 @@ def select_objects(objects, active=None):
         bpy.context.view_layer.objects.active = active
     elif objects:
         bpy.context.view_layer.objects.active = objects[0]
+
+
+def apply_smooth_shading(obj, auto_smooth_angle=30):
+    """
+    Apply auto smooth shading to CAD mesh for optimal surface display
+    
+    Args:
+        obj: Blender mesh object
+        auto_smooth_angle: Auto smooth angle in degrees (default 30°)
+    """
+    if obj.type != 'MESH':
+        return
+    
+    # Store selection state
+    was_selected = obj.select_get()
+    was_active = bpy.context.view_layer.objects.active
+    
+    # Select object
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    
+    # Apply shade auto smooth (Blender 4.1+)
+    # This is better than shade_smooth for CAD surfaces
+    try:
+        if hasattr(bpy.ops.object, 'shade_auto_smooth'):
+            # New unified operator (Blender 5.0+)
+            bpy.ops.object.shade_auto_smooth(angle=math.radians(auto_smooth_angle))
+        else:
+            # Fallback: shade smooth + legacy auto smooth
+            bpy.ops.object.shade_smooth()
+            if hasattr(obj.data, 'use_auto_smooth'):
+                obj.data.use_auto_smooth = True
+                obj.data.auto_smooth_angle = math.radians(auto_smooth_angle)
+    except Exception as e:
+        # Final fallback: just shade smooth
+        try:
+            bpy.ops.object.shade_smooth()
+        except:
+            pass
+    
+    # Restore selection
+    obj.select_set(was_selected)
+    bpy.context.view_layer.objects.active = was_active
+
+
+def create_material_from_color(name, color_rgba):
+    """
+    Create material from RGBA color
+    
+    Args:
+        name: Material name
+        color_rgba: RGBA tuple (r, g, b, a) in 0-1 range
+    
+    Returns:
+        Material object
+    """
+    # Check if material exists
+    mat = bpy.data.materials.get(name)
+    if mat:
+        return mat
+    
+    # Create new material
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    
+    # Get principled BSDF
+    nodes = mat.node_tree.nodes
+    principled = nodes.get('Principled BSDF')
+    
+    if principled:
+        # Set base color
+        principled.inputs['Base Color'].default_value = color_rgba
+        
+        # Adjust for CAD materials (less rough, more metallic if dark)
+        principled.inputs['Roughness'].default_value = 0.3
+        
+        # If color is dark, assume metallic
+        avg_color = (color_rgba[0] + color_rgba[1] + color_rgba[2]) / 3
+        if avg_color < 0.3:
+            principled.inputs['Metallic'].default_value = 0.5
+    
+    return mat
+
+
+def mesh_hash(mesh_data):
+    """
+    Calculate hash of mesh geometry for instance detection
+    
+    Args:
+        mesh_data: Blender mesh data
+    
+    Returns:
+        Hash string representing geometry
+    """
+    # Use vertex count, face count, and volume as simple hash
+    vert_count = len(mesh_data.vertices)
+    face_count = len(mesh_data.polygons)
+    
+    # Calculate approximate volume from bounding box
+    if vert_count > 0:
+        min_co = Vector(mesh_data.vertices[0].co)
+        max_co = Vector(mesh_data.vertices[0].co)
+        
+        for v in mesh_data.vertices:
+            for i in range(3):
+                min_co[i] = min(min_co[i], v.co[i])
+                max_co[i] = max(max_co[i], v.co[i])
+        
+        size = max_co - min_co
+        volume = size.x * size.y * size.z
+    else:
+        volume = 0
+    
+    # Create hash from counts and volume
+    return f"{vert_count}_{face_count}_{volume:.6f}"
+
+
+def are_meshes_identical(mesh1, mesh2, tolerance=0.0001):
+    """
+    Check if two meshes are geometrically identical
+    
+    Args:
+        mesh1, mesh2: Blender mesh data blocks
+        tolerance: Floating point comparison tolerance
+    
+    Returns:
+        True if meshes are identical
+    """
+    # Quick checks
+    if len(mesh1.vertices) != len(mesh2.vertices):
+        return False
+    if len(mesh1.polygons) != len(mesh2.polygons):
+        return False
+    
+    # Compare vertices (sample first 10 for performance)
+    sample_size = min(10, len(mesh1.vertices))
+    for i in range(sample_size):
+        v1 = mesh1.vertices[i].co
+        v2 = mesh2.vertices[i].co
+        if (v1 - v2).length > tolerance:
+            return False
+    
+    return True
+
+
+def convert_to_instance(obj, reference_obj):
+    """
+    Convert object to instance of reference object
+    
+    Args:
+        obj: Object to convert to instance
+        reference_obj: Reference object with original mesh
+    """
+    # Store transform
+    location = obj.location.copy()
+    rotation = obj.rotation_euler.copy()
+    scale = obj.scale.copy()
+    parent = obj.parent
+    
+    # Replace mesh data with reference
+    obj.data = reference_obj.data
+    
+    # Restore transform
+    obj.location = location
+    obj.rotation_euler = rotation
+    obj.scale = scale
+    obj.parent = parent
+    
+    # Mark as instance
+    obj['apexcad_instance_of'] = reference_obj.name

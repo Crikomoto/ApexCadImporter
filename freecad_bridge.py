@@ -64,135 +64,225 @@ class FreeCADBridge:
         Returns:
             Path to generated script
         """
-        script_content = f'''
-import FreeCAD
-import Import
-import Mesh
-import os
-import json
-
-# Configuration
-input_file = r"{input_file}"
-output_dir = r"{output_dir}"
-scale_factor = {options.get('scale', 1.0)}
-y_up = {options.get('y_up', True)}
-tessellation_quality = {options.get('tessellation_quality', 0.1)}
-
-print("ApexCad: Starting conversion...")
-print(f"Input: {{input_file}}")
-
-# Import the CAD file
-try:
-    doc = FreeCAD.newDocument("ApexCadImport")
-    
-    # Import STEP or IGES
-    file_ext = os.path.splitext(input_file)[1].lower()
-    if file_ext in ['.stp', '.step']:
-        Import.insert(input_file, "ApexCadImport")
-    elif file_ext in ['.igs', '.iges']:
-        Import.insert(input_file, "ApexCadImport")
-    else:
-        raise ValueError(f"Unsupported file format: {{file_ext}}")
-    
-    print(f"ApexCad: Loaded {{len(doc.Objects)}} objects")
-    
-    # Process objects and create hierarchy data
-    hierarchy_data = {{
-        "objects": [],
-        "root_objects": [],
-        "scale": scale_factor,
-        "y_up": y_up
-    }}
-    
-    object_map = {{}}
-    
-    for idx, obj in enumerate(doc.Objects):
-        obj_data = {{
-            "name": obj.Label,
-            "internal_name": obj.Name,
-            "type": obj.TypeId,
-            "index": idx,
-            "metadata": {{}},
-            "parent": None,
-            "children": []
-        }}
+        # Build script content using string concatenation to avoid f-string nesting issues
+        script_lines = [
+            'import FreeCAD',
+            'import Import',
+            'import Mesh',
+            'import os',
+            'import json',
+            'import time',
+            '',
+            '# Configuration',
+            f'input_file = r"{input_file}"',
+            f'output_dir = r"{output_dir}"',
+            f'scale_factor = {options.get("scale", 1.0)}',
+            f'y_up = {options.get("y_up", True)}',
+            f'tessellation_quality = {options.get("tessellation_quality", 0.1)}',
+            '',
+            'print("=" * 60)',
+            'print("FREECAD CONVERSION SCRIPT")',
+            'print("=" * 60)',
+            'print("Archivo: " + input_file)',
+            'print("Iniciando a las " + time.strftime("%H:%M:%S"))',
+            'print("=" * 60)',
+            '',
+            '# Import the CAD file',
+            'try:',
+            '    print("\\n[PASO 1/4] Creando documento FreeCAD...")',
+            '    t_start = time.time()',
+            '    doc = FreeCAD.newDocument("ApexCadImport")',
+            '    print("  OK - Documento creado en {:.2f}s".format(time.time()-t_start))',
+            '    ',
+            '    # Import STEP or IGES',
+            '    print("\\n[PASO 2/4] Importando archivo CAD...")',
+            '    print("  Esto puede tomar varios minutos...")',
+            '    file_ext = os.path.splitext(input_file)[1].lower()',
+            '    t_import = time.time()',
+            '    ',
+            '    if file_ext in [".stp", ".step"]:',
+            '        Import.insert(input_file, "ApexCadImport")',
+            '    elif file_ext in [".igs", ".iges"]:',
+            '        Import.insert(input_file, "ApexCadImport")',
+            '    else:',
+            '        raise ValueError("Unsupported file format: " + file_ext)',
+            '    ',
+            '    import_time = time.time() - t_import',
+            '    print("  OK - Archivo importado in {:.2f}s".format(import_time))',
+            '    print("  Objetos cargados: {}".format(len(doc.Objects)))',
+            '    ',
+            '    # Process objects',
+            '    print("\\n[PASO 3/4] Procesando {} objetos...".format(len(doc.Objects)))',
+            '    t_process = time.time()',
+            '    ',
+            '    hierarchy_data = {',
+            '        "objects": [],',
+            '        "root_objects": [],',
+            '        "scale": scale_factor,',
+            '        "y_up": y_up',
+            '    }',
+            '    ',
+            '    object_map = {}',
+            '    ',
+            '    # Datum objects to skip (reference planes, axes, origins)',
+            '    datum_types = ["App::Origin", "App::Plane", "App::Line", "PartDesign::Plane", "PartDesign::Line", "PartDesign::Point"]',
+            '    datum_names = ["Origin", "X-axis", "Y-axis", "Z-axis", "XY-plane", "XZ-plane", "YZ-plane"]',
+            '    ',
+            '    for idx, obj in enumerate(doc.Objects):',
+            '        # Skip datum/reference objects completely',
+            '        if obj.TypeId in datum_types:',
+            '            continue',
+            '        if obj.Label in datum_names or obj.Label.endswith(("001", "002", "003")) and any(obj.Label.startswith(d.replace("-", "")) for d in datum_names):',
+            '            # Skip Origin001, X-axis002, etc.',
+            '            continue',
+            '        ',
+            '        if idx % 10 == 0 and idx > 0:',
+            '            print("  Procesando objeto {}/{}...".format(idx, len(doc.Objects)))',
+            '        ',
+            '        obj_data = {',
+            '            "name": obj.Label,',
+            '            "internal_name": obj.Name,',
+            '            "type": obj.TypeId,',
+            '            "index": idx,',
+            '            "metadata": {},',
+            '            "parent": None,',
+            '            "children": []',
+            '        }',
+            '        ',
+            '        # Extract metadata',
+            '        if hasattr(obj, "Shape"):',
+            '            shape = obj.Shape',
+            '            obj_data["metadata"]["volume"] = shape.Volume if hasattr(shape, "Volume") else 0',
+            '            obj_data["metadata"]["area"] = shape.Area if hasattr(shape, "Area") else 0',
+            '            ',
+            '            try:',
+            '                bbox = shape.BoundBox',
+            '                obj_data["metadata"]["bbox"] = {',
+            '                    "min": [bbox.XMin, bbox.YMin, bbox.ZMin],',
+            '                    "max": [bbox.XMax, bbox.YMax, bbox.ZMax]',
+            '                }',
+            '            except:',
+            '                pass',
+            '        ',
+            '        # Extract color/material information',
+            '        if hasattr(obj, "ViewObject") and obj.ViewObject:',
+            '            vobj = obj.ViewObject',
+            '            ',
+            '            # Try to get shape color (STEP files often have colors)',
+            '            if hasattr(vobj, "ShapeColor"):',
+            '                color = vobj.ShapeColor',
+            '                # FreeCAD colors are tuples (r, g, b) in 0-1 range',
+            '                obj_data["metadata"]["color"] = [color[0], color[1], color[2], 1.0]',
+            '            ',
+            '            # Try to get diffuse color',
+            '            elif hasattr(vobj, "DiffuseColor") and vobj.DiffuseColor:',
+            '                # DiffuseColor is per-face, take first color',
+            '                color = vobj.DiffuseColor[0] if vobj.DiffuseColor else None',
+            '                if color:',
+            '                    obj_data["metadata"]["color"] = [color[0], color[1], color[2], color[3]]',
+            '        ',
+            '        # Extract standard CAD properties',
+            '        if hasattr(obj, "Description"):',
+            '            obj_data["metadata"]["description"] = obj.Description',
+            '        if hasattr(obj, "Material") and isinstance(obj.Material, str):',
+            '            obj_data["metadata"]["material_name"] = obj.Material',
+            '        ',
+            '        # Get position',
+            '        if hasattr(obj, "Placement"):',
+            '            placement = obj.Placement',
+            '            pos = placement.Base',
+            '            rot = placement.Rotation',
+            '            obj_data["transform"] = {',
+            '                "position": [pos.x, pos.y, pos.z],',  # NO aplicar scale aquí
+            '                "rotation": [rot.Q[0], rot.Q[1], rot.Q[2], rot.Q[3]]',
+            '            }',
+            '        ',
+            '        # Get parent relationship',
+            '        # First try using Parents property',
+            '        if hasattr(obj, "Parents") and obj.Parents:',
+            '            parent = obj.Parents[0][0]',
+            '            obj_data["parent"] = parent.Name',
+            '        ',
+            '        # Determine if this is a leaf object (actual geometry) or container',
+            '        is_leaf = True',
+            '        if hasattr(obj, "Group") and obj.Group:',
+            '            is_leaf = False',
+            '        obj_data["is_leaf"] = is_leaf',
+            '        ',
+            '        # Export mesh ONLY for leaf objects with actual geometry',
+            '        if hasattr(obj, "Shape") and obj.Shape.Faces and is_leaf:',
+            '            mesh_file = os.path.join(output_dir, obj.Name + ".obj")',
+            '            try:',
+            '                obj.Shape.tessellate(tessellation_quality)',
+            '                ',
+            '                # Export individual object using MeshPart for better separation',
+            '                import MeshPart',
+            '                mesh = MeshPart.meshFromShape(obj.Shape, LinearDeflection=tessellation_quality, AngularDeflection=0.5, Relative=False)',
+            '                mesh.write(mesh_file, "OBJ", obj.Name)',
+            '                ',
+            '                obj_data["mesh_file"] = mesh_file',
+            '                print("  Exported: {} (leaf object)".format(obj.Label))',
+            '            except Exception as e:',
+            '                print("  Warning - Failed to export {}: {}".format(obj.Label, str(e)))',
+            '                obj_data["mesh_file"] = None',
+            '        else:',
+            '            obj_data["mesh_file"] = None',
+            '            if not is_leaf:',
+            '                print("  Container: {}".format(obj.Label))',
+            '        ',
+            '        hierarchy_data["objects"].append(obj_data)',
+            '        object_map[obj.Name] = obj_data',
+            '    ',
+            '    # Build hierarchy from Group property (used by App::Part)',
+            '    for obj in doc.Objects:',
+            '        if hasattr(obj, "Group") and obj.Group:',
+            '            for child in obj.Group:',
+            '                if child.Name in object_map:',
+            '                    child_data = object_map[child.Name]',
+            '                    if not child_data.get("parent"):',
+            '                        child_data["parent"] = obj.Name',
+            '    ',
+            '    # Build children lists',
+            '    for obj_data in hierarchy_data["objects"]:',
+            '        if obj_data["parent"]:',
+            '            parent_data = object_map.get(obj_data["parent"])',
+            '            if parent_data:',
+            '                parent_data["children"].append(obj_data["internal_name"])',
+            '        else:',
+            '            hierarchy_data["root_objects"].append(obj_data["internal_name"])',
+            '    ',
+            '    process_time = time.time() - t_process',
+            '    print("  OK - Procesamiento completado in {:.2f}s".format(process_time))',
+            '    ',
+            '    # Save hierarchy data',
+            '    print("\\n[PASO 4/4] Guardando datos...")',
+            '    t_save = time.time()',
+            '    hierarchy_file = os.path.join(output_dir, "hierarchy.json")',
+            '    with open(hierarchy_file, "w") as f:',
+            '        json.dump(hierarchy_data, f, indent=2)',
+            '    save_time = time.time() - t_save',
+            '    print("  OK - Guardado en {:.2f}s".format(save_time))',
+            '    ',
+            '    total_time = time.time() - t_start',
+            '    print("\\n" + "=" * 60)',
+            '    print("CONVERSION EXITOSA")',
+            '    print("Tiempo total: {:.2f}s".format(total_time))',
+            '    print("  - Importacion STEP: {:.2f}s".format(import_time))',
+            '    print("  - Procesamiento: {:.2f}s".format(process_time))',
+            '    print("  - Guardado: {:.2f}s".format(save_time))',
+            '    print("Objetos procesados: {}".format(len(hierarchy_data["objects"])))',
+            '    print("=" * 60)',
+            '    ',
+            '    FreeCAD.closeDocument("ApexCadImport")',
+            '    ',
+            'except Exception as e:',
+            '    print("ERROR: " + str(e))',
+            '    import traceback',
+            '    traceback.print_exc()',
+            '    exit(1)',
+        ]
         
-        # Extract metadata
-        if hasattr(obj, 'Shape'):
-            shape = obj.Shape
-            obj_data["metadata"]["volume"] = shape.Volume if hasattr(shape, 'Volume') else 0
-            obj_data["metadata"]["area"] = shape.Area if hasattr(shape, 'Area') else 0
-            
-            # Get bounding box
-            try:
-                bbox = shape.BoundBox
-                obj_data["metadata"]["bbox"] = {{
-                    "min": [bbox.XMin, bbox.YMin, bbox.ZMin],
-                    "max": [bbox.XMax, bbox.YMax, bbox.ZMax]
-                }}
-            except:
-                pass
-        
-        # Get position (if available)
-        if hasattr(obj, 'Placement'):
-            placement = obj.Placement
-            pos = placement.Base
-            rot = placement.Rotation
-            
-            obj_data["transform"] = {{
-                "position": [pos.x * scale_factor, pos.y * scale_factor, pos.z * scale_factor],
-                "rotation": [rot.Q[0], rot.Q[1], rot.Q[2], rot.Q[3]]  # Quaternion
-            }}
-        
-        # Get parent relationship
-        if hasattr(obj, 'Parents') and obj.Parents:
-            parent = obj.Parents[0][0]
-            obj_data["parent"] = parent.Name
-        
-        # Export mesh
-        if hasattr(obj, 'Shape') and obj.Shape.Faces:
-            mesh_file = os.path.join(output_dir, f"{{obj.Name}}.obj")
-            
-            try:
-                # Tessellate shape
-                obj.Shape.tessellate(tessellation_quality)
-                
-                # Export as OBJ (preserves coordinates)
-                Mesh.export([obj], mesh_file)
-                obj_data["mesh_file"] = mesh_file
-                print(f"ApexCad: Exported {{obj.Label}} -> {{mesh_file}}")
-            except Exception as e:
-                print(f"ApexCad: Warning - Failed to export {{obj.Label}}: {{e}}")
-                obj_data["mesh_file"] = None
-        
-        hierarchy_data["objects"].append(obj_data)
-        object_map[obj.Name] = obj_data
-    
-    # Build parent-child relationships
-    for obj_data in hierarchy_data["objects"]:
-        if obj_data["parent"]:
-            parent_data = object_map.get(obj_data["parent"])
-            if parent_data:
-                parent_data["children"].append(obj_data["internal_name"])
-        else:
-            hierarchy_data["root_objects"].append(obj_data["internal_name"])
-    
-    # Save hierarchy data
-    hierarchy_file = os.path.join(output_dir, "hierarchy.json")
-    with open(hierarchy_file, 'w') as f:
-        json.dump(hierarchy_data, f, indent=2)
-    
-    print(f"ApexCad: Conversion complete! Hierarchy saved to {{hierarchy_file}}")
-    print(f"ApexCad: Processed {{len(hierarchy_data['objects'])}} objects")
-    
-    FreeCAD.closeDocument("ApexCadImport")
-    
-except Exception as e:
-    print(f"ApexCad: ERROR - {{str(e)}}")
-    import traceback
-    traceback.print_exc()
-    exit(1)
-'''
+        script_content = '\n'.join(script_lines)
         
         script_path = os.path.join(self.temp_dir, "convert_script.py")
         with open(script_path, 'w') as f:
@@ -256,61 +346,47 @@ except Exception as e:
         try:
             # Execute FreeCAD with platform-specific flags
             exec_start = time.time()
+            
+            # Dynamic timeout based on file size (generoso para diagnóstico)
+            timeout = 180 if file_size_mb < 1 else min(600, 180 + int(file_size_mb * 60))
+            
             print(f"\n[{time.time() - start_time:.2f}s] Ejecutando FreeCAD...")
             print(f"Comando: {self.freecad_path} -c {script_path}")
-            print(f"Esperando respuesta (timeout: 60s para archivos <1MB)...\n")
+            print(f"Timeout: {timeout}s\n")
+            print("="*60)
+            print("SALIDA DE FREECAD EN VIVO:")
+            print("="*60)
             
             # Platform-specific flags to prevent window creation
             if os.name == 'nt':  # Windows
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                creation_flags = subprocess.CREATE_NO_WINDOW
+                creation_flags = 0  # Sin CREATE_NO_WINDOW para diagnóstico
             else:  # Linux/Mac
                 startupinfo = None
                 creation_flags = 0
             
-            # Dynamic timeout based on file size
-            timeout = 60 if file_size_mb < 1 else min(300, 60 + int(file_size_mb * 30))
-            
+            # Sin capture_output para ver salida en tiempo real
             result = subprocess.run(
                 [self.freecad_path, "-c", script_path],
-                capture_output=True,
-                text=True,
+                stdin=subprocess.DEVNULL,
                 timeout=timeout,
                 startupinfo=startupinfo,
                 creationflags=creation_flags
             )
             
             exec_time = time.time() - exec_start
+            print("="*60)
             print(f"\n[{time.time() - start_time:.2f}s] FreeCAD terminó en {exec_time:.2f}s")
             print(f"Código de retorno: {result.returncode}")
-            
-            # Parse output
-            output_lines = result.stdout.split('\n')
-            
-            # Print FreeCAD output for debugging
-            print("\n" + "="*60)
-            print("SALIDA DE FREECAD:")
-            print("="*60)
-            for line in output_lines:
-                if line.strip():
-                    print(f"  {line}")
-            
-            if result.stderr.strip():
-                print("\nERRORES/ADVERTENCIAS:")
-                print("-"*60)
-                for line in result.stderr.split('\n'):
-                    if line.strip():
-                        print(f"  {line}")
-            print("="*60 + "\n")
             
             # Check for errors
             if result.returncode != 0:
                 print(f"\n❌ ERROR: FreeCAD falló con código {result.returncode}")
                 return {
                     'success': False,
-                    'error': f"FreeCAD conversion failed (code {result.returncode}): {result.stderr}",
-                    'output': result.stdout
+                    'error': f"FreeCAD conversion failed (code {result.returncode})",
+                    'output': ''
                 }
             
             # Load hierarchy data
@@ -341,7 +417,7 @@ except Exception as e:
                     'success': True,
                     'hierarchy': hierarchy_data,
                     'output_dir': output_dir,
-                    'output': result.stdout,
+                    'output': '',
                     'timing': {
                         'total': total_time,
                         'script_gen': script_time,
@@ -356,7 +432,7 @@ except Exception as e:
                 return {
                     'success': False,
                     'error': "Hierarchy file not generated",
-                    'output': result.stdout
+                    'output': ''
                 }
         
         except subprocess.TimeoutExpired:
