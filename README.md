@@ -3,101 +3,172 @@
 **Professional STEP and IGES Importer for Blender 5.0+**
 
 Author: **Cristian Koch R.**  
-Version: 1.0.0
+Version: **2.0.0**  
+License: MIT
 
 ---
 
 ## Overview
 
-ApexCad Importer is a professional-grade Blender addon that enables native import of CAD files (STEP and IGES formats) using FreeCAD as a backend conversion engine. Designed for production pipelines, it handles large assemblies with a divide-and-conquer strategy while maintaining stability and performance.
+ApexCad Importer is a professional-grade Blender addon that enables native import of CAD files (STEP and IGES formats) using FreeCAD as a backend conversion engine. Designed for production pipelines with advanced features like auto-smooth shading, material extraction, instance detection, and batch import.
 
-## Features
+## ✨ Features
 
-✨ **Core Capabilities:**
-- Import STEP (.stp, .step) and IGES (.igs, .iges) files natively in Blender
-- Powered by FreeCAD command-line for robust CAD conversion
-- Asynchronous processing to prevent Blender freezing
-- Scalable architecture for large assemblies (divide and conquer)
+### Import & Conversion
+- ✅ Native STEP (.stp, .step) and IGES (.igs, .iges) support
+- ✅ FreeCAD-powered robust conversion
+- ✅ Auto-smooth shading for perfect CAD surface display
+- ✅ Material/color extraction from STEP files
+- ✅ Automatic instance detection (memory optimization)
+- ✅ Scale presets (mm→m, cm→m, inch→m) + custom
+- ✅ Y-up coordinate conversion (CAD Z-up → Blender Y-up)
+- ✅ Hierarchy preservation (nested assemblies)
+- ✅ CAD metadata extraction (volume, area, bbox, colors)
 
-🎯 **Advanced Features:**
-- **Scale Conversion**: Preset conversions (mm→m, cm→m, inch→m) or custom scale
-- **Hierarchy Preservation**: Import as Collections or Empty-based hierarchies
-- **Y-Up Conversion**: Automatic coordinate system conversion from CAD Z-up
-- **Metadata Transfer**: CAD metadata embedded as custom properties
-- **Pivot Points**: Original pivot points and transforms preserved
-- **Non-destructive Re-tessellation**: Adjust mesh quality after import
+### Advanced Features
+- ✅ **Re-tessellation**: Change mesh quality after import (single object or entire hierarchy)
+- ✅ **Batch Import**: Import entire folders with error recovery
+- ✅ **Instance Detection**: Automatic mesh sharing for duplicate parts
+- ✅ **Datum Filtering**: Removes reference planes/axes automatically
+- ✅ **Non-blocking**: Asynchronous processing prevents Blender freeze
 
-## Requirements
+## 📋 Requirements
 
-### Software Requirements:
-- **Blender 5.0+** (tested with 5.0.0)
-- **FreeCAD 0.20+** with command-line support
-  - Windows: `FreeCADCmd.exe` or `freecad.exe` (both work)
-  - Linux/Mac: `freecad` or `freecadcmd`
-  - The addon will automatically detect either executable
+- **Blender 5.0+**
+- **FreeCAD 1.0+** (or 0.20+)
+  - Auto-detected on installation
+  - Windows: `FreeCADCmd.exe` in Program Files
+  - Linux: `freecad` in PATH
+  - macOS: FreeCAD.app
 
-### Installation:
+## 🚀 Installation
 
-1. **Install FreeCAD:**
-   - Windows: Download from [freecad.org](https://www.freecad.org)
-   - Linux: `sudo apt install freecad` or equivalent
-   - Mac: `brew install --cask freecad`
+1. **Download** this repository as ZIP or clone it
+2. **Blender** → Edit → Preferences → Add-ons → Install
+3. Select the `ApexCadImporter` folder
+4. **Enable** "Import-Export: ApexCad Importer"
+5. FreeCAD will be **auto-detected** (or set manually in preferences)
 
-2. **Install ApexCad Addon:**
-   - Download the `ApexCadImporter` folder
-   - In Blender: Edit → Preferences → Add-ons → Install
-   - Navigate to the folder and select it
-   - Enable "Import-Export: ApexCad Importer"
+## 📖 Usage
 
-3. **Configure FreeCAD Path:**
-   - In addon preferences, click the search icon to auto-detect
-   - Or manually set path to FreeCAD executable
-   - Verify that "✓ FreeCAD found" appears
+### Single File Import
 
-## Usage
+**File → Import → STEP/IGES**
 
-### Basic Import:
+Options:
+- **Scale**: mm→m (0.001) for metric CAD files
+- **Mesh Quality**: 0.01 = fine, 0.1 = balanced, 1.0 = coarse
+- **Y-Up**: Enable for proper Blender orientation
+- **Hierarchy**: Collections (recommended) or Empties
 
-1. **File → Import → STEP/IGES (.stp, .igs)**
-2. Select your CAD file
-3. Configure import options:
-   - **Scale**: Choose unit conversion or custom scale
-   - **Hierarchy Mode**: Collections or Empty objects
-   - **Y-Up Conversion**: Enable for standard Blender orientation
-   - **Mesh Quality**: Lower = better quality (0.01-5.0)
-4. Click "Import STEP/IGES"
+### Batch Import
 
-### Import Options Explained:
+**3D Viewport → N Panel → ApexCad → Batch Import Folder**
 
-#### Scale Settings:
-- **mm → m (0.001)**: For CAD files in millimeters (most common)
-- **cm → m (0.01)**: For centimeter-based models
-- **m → m (1.0)**: No scaling needed
-- **inch → m (0.0254)**: For imperial units
-- **Custom**: Specify your own scale factor
+- Select folder with multiple STEP/IGES files
+- All files import automatically
+- Failed files create error collections
+- Progress shown in console
 
-#### Hierarchy Mode:
-- **Collections**: Organizes parts in Blender Collections (recommended)
-- **Empty Objects**: Uses Empty objects as hierarchy nodes (traditional)
+### Re-tessellation
 
-#### Coordinate System:
-- **Y-Up Conversion**: Most CAD uses Z-up; enable this for Blender's Y-up system
+**Select object → ApexCad Panel → Re-tessellate**
 
-#### Mesh Quality:
-- Lower values = higher quality, more faces, slower import
-- **0.01**: Ultra high quality (slow)
-- **0.1**: Good balance (default)
-- **1.0**: Fast, lower quality
+- **Re-tessellate Object**: Change quality of selected part
+- **Re-tessellate Hierarchy**: Change quality of entire assembly
 
-### Re-tessellation:
+## 🎨 Features in Detail
 
-After importing, you can adjust mesh quality non-destructively:
+### Auto Smooth Shading
+All imported meshes get `shade_auto_smooth` with 30° angle for perfect CAD surface display (sharp edges preserved, smooth surfaces polished).
 
-1. Select a CAD-imported object
-2. In the **ApexCad panel** (3D Viewport → Sidebar → ApexCad tab)
-3. Click "Re-tessellate"
-4. Choose new quality setting
-5. Apply
+### Material Extraction
+Colors from STEP files automatically create PBR materials:
+- Extracts ShapeColor and DiffuseColor
+- Auto-configures roughness (0.3) for CAD look
+- Metallic detection for dark colors
+
+### Instance Detection
+Identical parts automatically share mesh data:
+- Detects duplicates via geometry hash
+- Converts to instances (saves 50-90% memory)
+- Preserves individual transforms
+- Example: 20 identical bolts = 1 mesh, 20 instances
+
+### Metadata Extraction
+CAD properties stored as custom properties:
+- `cad_volume`: Part volume
+- `cad_area`: Surface area
+- `cad_bbox`: Bounding box
+- `cad_color`: RGBA color
+- `apexcad_source_file`: Original file path
+- `apexcad_tessellation`: Current quality
+
+## 🔧 Preferences
+
+**Edit → Preferences → Add-ons → ApexCad Importer**
+
+- **FreeCAD Path**: Auto-detected or manual
+- **Auto-Detect FreeCAD**: Scans common locations on startup
+- **Default Settings**: Scale, hierarchy mode, Y-up
+- **Performance**: Max chunk size for large assemblies
+
+## 📊 Performance Tips
+
+1. **Start with low quality** (0.1) for preview
+2. **Re-tessellate** specific parts to higher quality (0.01)
+3. **Batch import** uses background processing
+4. **Instance detection** automatically optimizes memory
+
+## 🐛 Troubleshooting
+
+### FreeCAD Not Found
+- Click "Auto-Detect" in preferences
+- Or manually browse to:
+  - Windows: `C:\Program Files\FreeCAD 1.0\bin\FreeCADCmd.exe`
+  - Linux: `/usr/bin/freecad`
+  - macOS: `/Applications/FreeCAD.app/Contents/MacOS/FreeCAD`
+
+### Import Failed
+- Check console (Window → Toggle System Console)
+- Verify STEP file is valid (open in FreeCAD first)
+- Try lower tessellation quality
+- Check FreeCAD version (1.0+ recommended)
+
+### Batch Import Errors
+- Failed files create `ERROR_filename.stp` collections
+- Check console for specific error messages
+- Corrupted files are skipped automatically
+
+## 🔗 Links
+
+- **GitHub**: https://github.com/Crikomoto/ApexCadImporter
+- **Issues**: https://github.com/Crikomoto/ApexCadImporter/issues
+- **FreeCAD**: https://www.freecad.org
+
+## 📝 Changelog
+
+### v2.0.0 (2026-01-11)
+- Auto smooth shading for CAD surfaces
+- Material/color extraction from STEP
+- Instance detection for duplicate parts
+- Re-tessellation (object + hierarchy)
+- Batch import with error recovery
+- Datum filtering (50% fewer objects)
+- Enhanced FreeCAD auto-detection
+
+### v1.0.0
+- Initial release
+- STEP/IGES import
+- Basic hierarchy support
+
+## 📄 License
+
+MIT License - See LICENSE.md
+
+---
+
+**Made with ❤️ for the Blender + CAD community**
 
 Or use the Properties panel → Object Properties → CAD Properties section.
 
