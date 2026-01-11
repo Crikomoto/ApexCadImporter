@@ -115,24 +115,31 @@ class APEXCAD_OT_DetectFreeCAD(bpy.types.Operator):
     bl_label = "Detect FreeCAD"
     bl_description = "Automatically detect FreeCAD installation"
     
-    def search_program_files(self, base_path, executable_name):
+    def search_program_files(self, base_path, executable_names):
         """Search recursively in Program Files for FreeCAD"""
         if not os.path.exists(base_path):
             return None
+        
+        # If executable_names is a string, convert to list
+        if isinstance(executable_names, str):
+            executable_names = [executable_names]
         
         try:
             # Look for FreeCAD folders
             for item in os.listdir(base_path):
                 if 'freecad' in item.lower():
                     freecad_dir = os.path.join(base_path, item)
-                    # Check bin folder
-                    bin_path = os.path.join(freecad_dir, 'bin', executable_name)
-                    if os.path.exists(bin_path):
-                        return bin_path
-                    # Sometimes it's directly in the folder
-                    direct_path = os.path.join(freecad_dir, executable_name)
-                    if os.path.exists(direct_path):
-                        return direct_path
+                    
+                    # Check for each possible executable name
+                    for exec_name in executable_names:
+                        # Check bin folder
+                        bin_path = os.path.join(freecad_dir, 'bin', exec_name)
+                        if os.path.exists(bin_path):
+                            return bin_path
+                        # Sometimes it's directly in the folder
+                        direct_path = os.path.join(freecad_dir, exec_name)
+                        if os.path.exists(direct_path):
+                            return direct_path
         except (PermissionError, OSError):
             pass
         
@@ -145,47 +152,51 @@ class APEXCAD_OT_DetectFreeCAD(bpy.types.Operator):
         
         # Windows-specific detection
         if os.name == 'nt':
-            # Try PATH environment first
-            try:
-                result = subprocess.run(
-                    ["where", "FreeCADCmd.exe"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    path = result.stdout.strip().split('\n')[0]
-                    if os.path.exists(path):
-                        prefs.freecad_path = path
-                        self.report({'INFO'}, f"FreeCAD found in PATH: {path}")
-                        print(f"ApexCad: Found FreeCAD at {path}")
-                        return {'FINISHED'}
-            except:
-                pass
+            # Try PATH environment first (try both executables)
+            for exec_name in ["FreeCADCmd.exe", "freecad.exe", "FreeCAD.exe"]:
+                try:
+                    result = subprocess.run(
+                        ["where", exec_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        path = result.stdout.strip().split('\n')[0]
+                        if os.path.exists(path):
+                            prefs.freecad_path = path
+                            self.report({'INFO'}, f"FreeCAD found in PATH: {path}")
+                            print(f"ApexCad: Found FreeCAD at {path}")
+                            return {'FINISHED'}
+                except:
+                    pass
             
-            # Search in Program Files
+            # Search in Program Files (try both executables)
             program_files_paths = [
                 r"C:\Program Files",
                 r"C:\Program Files (x86)",
             ]
             
+            executable_names = ["FreeCADCmd.exe", "freecad.exe", "FreeCAD.exe"]
+            
             for base_path in program_files_paths:
-                found_path = self.search_program_files(base_path, "FreeCADCmd.exe")
+                found_path = self.search_program_files(base_path, executable_names)
                 if found_path:
                     prefs.freecad_path = found_path
                     self.report({'INFO'}, f"FreeCAD found: {found_path}")
                     print(f"ApexCad: Found FreeCAD at {found_path}")
                     return {'FINISHED'}
             
-            # Specific common paths as fallback
-            common_paths = [
-                r"C:\Program Files\FreeCAD 0.21\bin\FreeCADCmd.exe",
-                r"C:\Program Files\FreeCAD 0.22\bin\FreeCADCmd.exe",
-                r"C:\Program Files\FreeCAD 0.20\bin\FreeCADCmd.exe",
-                r"C:\Program Files\FreeCAD 1.0\bin\FreeCADCmd.exe",
-                r"C:\Program Files\FreeCAD\bin\FreeCADCmd.exe",
-                r"C:\Program Files (x86)\FreeCAD\bin\FreeCADCmd.exe",
-            ]
+            # Specific common paths as fallback (check both executables)
+            common_paths = []
+            for version in ["0.21", "0.22", "0.20", "1.0", ""]:
+                base = rf"C:\Program Files\FreeCAD {version}\bin" if version else r"C:\Program Files\FreeCAD\bin"
+                for exec_name in ["FreeCADCmd.exe", "freecad.exe"]:
+                    common_paths.append(os.path.join(base, exec_name))
+            
+            # Also check x86
+            common_paths.append(r"C:\Program Files (x86)\FreeCAD\bin\FreeCADCmd.exe")
+            common_paths.append(r"C:\Program Files (x86)\FreeCAD\bin\freecad.exe")
             
             for path in common_paths:
                 if os.path.exists(path):

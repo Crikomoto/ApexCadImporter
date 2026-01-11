@@ -32,8 +32,9 @@ ApexCad Importer is a professional-grade Blender addon that enables native impor
 ### Software Requirements:
 - **Blender 5.0+** (tested with 5.0.0)
 - **FreeCAD 0.20+** with command-line support
-  - Windows: `FreeCADCmd.exe`
+  - Windows: `FreeCADCmd.exe` or `freecad.exe` (both work)
   - Linux/Mac: `freecad` or `freecadcmd`
+  - The addon will automatically detect either executable
 
 ### Installation:
 

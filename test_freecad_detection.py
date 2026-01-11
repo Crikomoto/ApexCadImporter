@@ -13,19 +13,20 @@ print("="*60)
 # Test 1: Check PATH
 print("\n1. Checking PATH environment...")
 if os.name == 'nt':
-    try:
-        result = subprocess.run(
-            ["where", "FreeCADCmd.exe"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            print(f"   ✓ Found in PATH: {result.stdout.strip()}")
-        else:
-            print("   ✗ Not found in PATH")
-    except Exception as e:
-        print(f"   ✗ Error checking PATH: {e}")
+    for exec_name in ["FreeCADCmd.exe", "freecad.exe", "FreeCAD.exe"]:
+        try:
+            result = subprocess.run(
+                ["where", exec_name],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                print(f"   ✓ Found {exec_name} in PATH: {result.stdout.strip()}")
+            else:
+                print(f"   ✗ {exec_name} not found in PATH")
+        except Exception as e:
+            print(f"   ✗ Error checking {exec_name}: {e}")
 else:
     try:
         result = subprocess.run(
@@ -45,13 +46,13 @@ else:
 print("\n2. Checking common installation paths...")
 
 if os.name == 'nt':
-    paths_to_check = [
-        r"C:\Program Files\FreeCAD 0.21\bin\FreeCADCmd.exe",
-        r"C:\Program Files\FreeCAD 0.22\bin\FreeCADCmd.exe",
-        r"C:\Program Files\FreeCAD 0.20\bin\FreeCADCmd.exe",
-        r"C:\Program Files\FreeCAD\bin\FreeCADCmd.exe",
-        r"C:\Program Files (x86)\FreeCAD\bin\FreeCADCmd.exe",
-    ]
+    paths_to_check = []
+    for version in ["0.21", "0.22", "0.20", "1.0", ""]:
+        base = rf"C:\Program Files\FreeCAD {version}\bin" if version else r"C:\Program Files\FreeCAD\bin"
+        paths_to_check.append(os.path.join(base, "FreeCADCmd.exe"))
+        paths_to_check.append(os.path.join(base, "freecad.exe"))
+    paths_to_check.append(r"C:\Program Files (x86)\FreeCAD\bin\FreeCADCmd.exe")
+    paths_to_check.append(r"C:\Program Files (x86)\FreeCAD\bin\freecad.exe")
 else:
     paths_to_check = [
         "/usr/bin/freecad",
@@ -77,10 +78,12 @@ if os.name == 'nt':
                 for item in os.listdir(base):
                     if 'freecad' in item.lower():
                         freecad_dir = os.path.join(base, item)
-                        bin_path = os.path.join(freecad_dir, 'bin', 'FreeCADCmd.exe')
-                        if os.path.exists(bin_path):
-                            print(f"   ✓ Found: {bin_path}")
-                            found_paths.append(bin_path)
+                        # Check for both executables
+                        for exec_name in ["FreeCADCmd.exe", "freecad.exe"]:
+                            bin_path = os.path.join(freecad_dir, 'bin', exec_name)
+                            if os.path.exists(bin_path):
+                                print(f"   ✓ Found: {bin_path}")
+                                found_paths.append(bin_path)
             except (PermissionError, OSError) as e:
                 print(f"   ✗ Error scanning {base}: {e}")
 
