@@ -1,0 +1,61 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Blender specific
+*.blend1
+*.blend2
+*.blend@
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+apexcad_*/
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Testing
+test_files/
+*.stp.bak
+*.step.bak
+*.igs.bak
+*.iges.bak
+
+# Logs
+*.log
+
+# FreeCAD temporary
+*.FCStd1
+*.FCBak
