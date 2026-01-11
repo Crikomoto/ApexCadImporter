@@ -36,7 +36,6 @@ from . import operators
 from . import ui
 from . import freecad_bridge
 from . import importer
-from . import tessellation
 from . import utils
 
 # Modules list for registration
@@ -44,7 +43,6 @@ modules = [
     preferences,
     operators,
     ui,
-    tessellation,
 ]
 
 
