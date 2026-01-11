@@ -121,11 +121,11 @@ class CADImporter:
         if hierarchy_mode == 'COLLECTION':
             main_collection = utils.get_collection(self.context, file_name)
             self.collection_map[file_name] = main_collection
-            # Create root Empty in the collection
-            root_parent = utils.create_empty(file_name, collection=main_collection)
+            # In COLLECTION mode, collections form the hierarchy (no root Empty)
+            root_parent = None
         else:  # EMPTY mode
             main_collection = self.context.scene.collection
-            # Create root Empty in scene collection
+            # Create root Empty for hierarchy
             root_parent = utils.create_empty(file_name, collection=main_collection)
         
         self.object_map[file_name] = root_parent
@@ -161,13 +161,14 @@ class CADImporter:
                 print(f"  ... and {len(assemblies) - 5} more")
         
         for obj_data in objects_data:
-            self._setup_parent_child(obj_data)
+            self._setup_parent_child(obj_data, hierarchy_mode)
         
-        # Reconstruct nested hierarchy from naming patterns
+        # Reconstruct nested hierarchy from naming patterns (EMPTY mode only)
         # STEP files imported by FreeCAD lose nested hierarchy
         # We reconstruct it by matching name prefixes
-        print("ApexCad: Reconstructing nested hierarchy from names...")
-        self._reconstruct_hierarchy()
+        if hierarchy_mode == 'EMPTY':
+            print("ApexCad: Reconstructing nested hierarchy from names...")
+            self._reconstruct_hierarchy()
         
         # Detect and create instances for optimization
         self._detect_and_create_instances()
@@ -202,32 +203,45 @@ class CADImporter:
         
         # Create Empties for assemblies (containers without geometry)
         if not mesh_file:
-            # For containers (assemblies), create an Empty
+            # For containers (assemblies), create an Empty or sub-collection
             if not is_leaf:
                 # Assemblies are at origin since children have world coordinates
-                empty = utils.create_empty(
-                    obj_name,
-                    location=[0, 0, 0],
-                    parent=root_parent,
-                    collection=main_collection
-                )
-                
-                utils.set_custom_properties(empty, metadata)
-                self.object_map[internal_name] = empty
-                self.imported_objects.append(empty)
-                print(f"  ○ Assembly: {obj_name}")
+                if hierarchy_mode == 'COLLECTION':
+                    # Create sub-collection for this assembly
+                    sub_collection = utils.get_collection(self.context, obj_name, parent=main_collection)
+                    self.collection_map[internal_name] = sub_collection
+                    # No Empty needed - collections form the hierarchy
+                    self.object_map[internal_name] = None  # Marker for sub-collection
+                    print(f"  ○ Assembly (Collection): {obj_name}")
+                else:
+                    # EMPTY mode: create Empty for hierarchy
+                    empty = utils.create_empty(
+                        obj_name,
+                        location=[0, 0, 0],
+                        parent=root_parent,
+                        collection=main_collection
+                    )
+                    utils.set_custom_properties(empty, metadata)
+                    self.object_map[internal_name] = empty
+                    self.imported_objects.append(empty)
+                    print(f"  ○ Assembly (Empty): {obj_name}")
             else:
                 # Leaf without geometry (shouldn't happen after datum filtering)
                 print(f"  ⊘ Skipped: {obj_name} (no geometry)")
-                self.object_map[internal_name] = None
                 self.object_map[internal_name] = None
             return
         
         # Get or create collection/parent for this object
         if hierarchy_mode == 'COLLECTION':
-            obj_collection = main_collection
-            obj_parent = None
+            # Use parent's collection if exists
+            parent_info = obj_data.get('parent')
+            if parent_info and parent_info in self.collection_map:
+                obj_collection = self.collection_map[parent_info]
+            else:
+                obj_collection = main_collection
+            obj_parent = None  # Collections handle hierarchy
         else:
+            # EMPTY mode: use Empty hierarchy
             obj_collection = main_collection
             obj_parent = root_parent
         
@@ -273,7 +287,8 @@ class CADImporter:
                         imported_obj.data.materials.append(material)
                 
                 # Store mesh hash for instance detection
-                imported_obj['apexcad_mesh_hash'] = utils.mesh_hash(imported_obj.data)
+                mesh_hash_value = utils.mesh_hash(imported_obj.data)
+                imported_obj['apexcad_mesh_hash'] = mesh_hash_value
                 imported_obj['apexcad_can_retessellate'] = True
                 
                 self.object_map[internal_name] = imported_obj
@@ -297,8 +312,12 @@ class CADImporter:
                 self.imported_objects.append(empty)
                 print(f"  ○ Created empty: {obj_name}")
     
-    def _setup_parent_child(self, obj_data):
+    def _setup_parent_child(self, obj_data, hierarchy_mode='EMPTY'):
         """Setup parent-child relationships after all objects are created"""
+        # In COLLECTION mode, collections handle hierarchy - skip object parenting
+        if hierarchy_mode == 'COLLECTION':
+            return
+            
         internal_name = obj_data['internal_name']
         parent_name = obj_data.get('parent')
         
