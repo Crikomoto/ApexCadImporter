@@ -90,6 +90,8 @@ class APEXCAD_AddonPreferences(AddonPreferences):
         if self.freecad_path:
             if os.path.exists(self.freecad_path):
                 box.label(text="✓ FreeCAD found", icon='CHECKMARK')
+                # Add test button
+                box.operator("apexcad.test_freecad", text="Test FreeCAD Connection", icon='PLAY')
             else:
                 box.label(text="✗ FreeCAD path invalid", icon='ERROR')
         else:

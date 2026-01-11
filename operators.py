@@ -74,6 +74,23 @@ class APEXCAD_OT_ImportCAD(bpy.types.Operator, ImportHelper):
         # Get preferences
         prefs = context.preferences.addons[__package__].preferences
         
+        # Validate FreeCAD path first
+        if not prefs.freecad_path:
+            self.report({'ERROR'}, "FreeCAD path not configured. Check addon preferences.")
+            return {'CANCELLED'}
+        
+        if not os.path.exists(prefs.freecad_path):
+            self.report({'ERROR'}, f"FreeCAD not found at: {prefs.freecad_path}")
+            return {'CANCELLED'}
+        
+        # Validate input file
+        if not os.path.exists(self.filepath):
+            self.report({'ERROR'}, f"Input file not found: {self.filepath}")
+            return {'CANCELLED'}
+        
+        file_size = os.path.getsize(self.filepath) / (1024 * 1024)  # MB
+        print(f"ApexCad: Importing {os.path.basename(self.filepath)} ({file_size:.2f} MB)")
+        
         # Determine scale
         if self.scale_preset == 'CUSTOM':
             scale = self.custom_scale
@@ -82,6 +99,9 @@ class APEXCAD_OT_ImportCAD(bpy.types.Operator, ImportHelper):
         
         # Get chunk size from preferences
         chunk_size = prefs.max_chunk_size
+        
+        # Show progress message
+        self.report({'INFO'}, f"Starting import... This may take a while.")
         
         # Import file
         success, message, imported_objects = importer.import_cad_file(
@@ -215,11 +235,56 @@ class APEXCAD_OT_ShowImportStats(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class APEXCAD_OT_TestFreeCAD(bpy.types.Operator):
+    """Test FreeCAD connection and functionality"""
+    bl_idname = "apexcad.test_freecad"
+    bl_label = "Test FreeCAD Connection"
+    bl_description = "Verify FreeCAD is working correctly"
+    
+    def execute(self, context):
+        prefs = context.preferences.addons[__package__].preferences
+        
+        if not prefs.freecad_path:
+            self.report({'ERROR'}, "FreeCAD path not configured")
+            return {'CANCELLED'}
+        
+        if not os.path.exists(prefs.freecad_path):
+            self.report({'ERROR'}, f"FreeCAD not found at: {prefs.freecad_path}")
+            return {'CANCELLED'}
+        
+        # Test version
+        try:
+            import subprocess
+            result = subprocess.run(
+                [prefs.freecad_path, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            if result.returncode == 0:
+                version = result.stdout.strip()[:100]
+                self.report({'INFO'}, f"FreeCAD OK: {version}")
+                print(f"\nApexCad: FreeCAD test successful")
+                print(f"  Path: {prefs.freecad_path}")
+                print(f"  Version: {version}\n")
+                return {'FINISHED'}
+            else:
+                self.report({'ERROR'}, f"FreeCAD failed (code {result.returncode})")
+                return {'CANCELLED'}
+        except subprocess.TimeoutExpired:
+            self.report({'ERROR'}, "FreeCAD test timed out (>15s)")
+            return {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Test failed: {str(e)}")
+            return {'CANCELLED'}
+
+
 # Registration
 classes = (
     APEXCAD_OT_ImportCAD,
     APEXCAD_OT_Retessellate,
     APEXCAD_OT_ShowImportStats,
+    APEXCAD_OT_TestFreeCAD,
 )
 
 

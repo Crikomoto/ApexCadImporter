@@ -42,10 +42,22 @@ class CADImporter:
         # Get FreeCAD bridge
         bridge, error = freecad_bridge.get_bridge(self.context)
         if error:
+            print(f"ApexCad: Bridge error - {error}")
             return False, error, []
+        
+        # Validate FreeCAD before starting
+        print("ApexCad: Validating FreeCAD installation...")
+        is_valid, validation_msg = bridge.validate_freecad()
+        if not is_valid:
+            error_msg = f"FreeCAD validation failed: {validation_msg}"
+            print(f"ApexCad: {error_msg}")
+            return False, error_msg, []
+        
+        print(f"ApexCad: FreeCAD validation OK - {validation_msg}")
         
         # Create temporary output directory
         output_dir = tempfile.mkdtemp(prefix="apexcad_import_")
+        print(f"ApexCad: Output directory: {output_dir}")
         
         # Prepare conversion options
         conversion_options = {
@@ -54,11 +66,19 @@ class CADImporter:
             'tessellation_quality': options.get('tessellation_quality', 0.1),
         }
         
-        print(f"ApexCad: Starting import of {filepath}")
+        print(f"ApexCad: Starting import of {os.path.basename(filepath)}")
         print(f"ApexCad: Options: {conversion_options}")
         
         # Convert file using FreeCAD
+        print("ApexCad: Starting FreeCAD conversion (this may take a while)...")
         result = bridge.convert_file_sync(filepath, output_dir, conversion_options)
+        
+        if not result['success']:
+            error_msg = result.get('error', 'Unknown error')
+            print(f"ApexCad: Conversion failed - {error_msg}")
+            return False, error_msg, []
+        
+        print("ApexCad: FreeCAD conversion completed successfully")
         
         if not result['success']:
             return False, result.get('error', 'Unknown error'), []

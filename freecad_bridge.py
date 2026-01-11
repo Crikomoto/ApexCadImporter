@@ -32,15 +32,22 @@ class FreeCADBridge:
             return False, "FreeCAD executable not found"
         
         try:
+            # Test FreeCAD execution
+            print(f"ApexCad: Validating FreeCAD at {self.freecad_path}")
             result = subprocess.run(
                 [self.freecad_path, "--version"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             if result.returncode == 0:
-                return True, result.stdout.strip()
-            return False, "Failed to execute FreeCAD"
+                version = result.stdout.strip()
+                print(f"ApexCad: FreeCAD validation OK - {version}")
+                return True, version
+            return False, f"Failed to execute FreeCAD (code {result.returncode})"
+        except subprocess.TimeoutExpired:
+            return False, "FreeCAD validation timeout (>10s)"
         except Exception as e:
             return False, str(e)
     
@@ -219,29 +226,68 @@ except Exception as e:
         Returns:
             Dict with conversion results
         """
+        # Validate input file
+        if not os.path.exists(input_file):
+            return {
+                'success': False,
+                'error': f"Input file not found: {input_file}"
+            }
+        
+        file_size = os.path.getsize(input_file) / (1024 * 1024)  # MB
+        print(f"ApexCad: Input file: {os.path.basename(input_file)} ({file_size:.2f} MB)")
+        
         os.makedirs(output_dir, exist_ok=True)
         
         # Generate conversion script
         script_path = self.generate_conversion_script(input_file, output_dir, options)
+        print(f"ApexCad: Generated script at {script_path}")
         
         try:
-            # Execute FreeCAD
-            print(f"ApexCad: Running FreeCAD conversion...")
+            # Execute FreeCAD with platform-specific flags
+            print(f"ApexCad: Starting FreeCAD conversion...")
+            print(f"ApexCad: Command: {self.freecad_path} -c {script_path}")
+            
+            # Platform-specific flags to prevent window creation
+            if os.name == 'nt':  # Windows
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                creation_flags = subprocess.CREATE_NO_WINDOW
+            else:  # Linux/Mac
+                startupinfo = None
+                creation_flags = 0
+            
             result = subprocess.run(
                 [self.freecad_path, "-c", script_path],
                 capture_output=True,
                 text=True,
-                timeout=300  # 5 minute timeout
+                timeout=300,  # 5 minute timeout
+                startupinfo=startupinfo,
+                creationflags=creation_flags
             )
+            
+            print(f"ApexCad: FreeCAD finished with return code: {result.returncode}")
             
             # Parse output
             output_lines = result.stdout.split('\n')
             
+            # Print FreeCAD output for debugging
+            print("\n" + "="*50)
+            print("FreeCAD Output:")
+            print("="*50)
+            for line in output_lines[:20]:  # First 20 lines
+                if line.strip():
+                    print(f"  {line}")
+            if len(output_lines) > 20:
+                print(f"  ... ({len(output_lines) - 20} more lines)")
+            print("="*50 + "\n")
+            
             # Check for errors
             if result.returncode != 0:
+                print(f"ApexCad: ERROR - FreeCAD failed with code {result.returncode}")
+                print(f"ApexCad: STDERR: {result.stderr}")
                 return {
                     'success': False,
-                    'error': f"FreeCAD conversion failed: {result.stderr}",
+                    'error': f"FreeCAD conversion failed (code {result.returncode}): {result.stderr}",
                     'output': result.stdout
                 }
             
