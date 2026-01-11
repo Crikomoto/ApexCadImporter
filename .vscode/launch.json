@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Blender: Start",
+            "type": "blender",
+            "request": "launch"
+        },
+        {
+            "name": "Blender: Debug Script",
+            "type": "blender",
+            "request": "launch",
+            "script": "${file}"
+        }
+    ]
+}

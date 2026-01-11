@@ -35,7 +35,7 @@ tmp/
 apexcad_*/
 
 # IDE specific
-.vscode/
+.vscode/*.log
 .idea/
 *.swp
 *.swo
