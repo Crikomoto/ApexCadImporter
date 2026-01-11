@@ -115,45 +115,126 @@ class APEXCAD_OT_DetectFreeCAD(bpy.types.Operator):
     bl_label = "Detect FreeCAD"
     bl_description = "Automatically detect FreeCAD installation"
     
+    def search_program_files(self, base_path, executable_name):
+        """Search recursively in Program Files for FreeCAD"""
+        if not os.path.exists(base_path):
+            return None
+        
+        try:
+            # Look for FreeCAD folders
+            for item in os.listdir(base_path):
+                if 'freecad' in item.lower():
+                    freecad_dir = os.path.join(base_path, item)
+                    # Check bin folder
+                    bin_path = os.path.join(freecad_dir, 'bin', executable_name)
+                    if os.path.exists(bin_path):
+                        return bin_path
+                    # Sometimes it's directly in the folder
+                    direct_path = os.path.join(freecad_dir, executable_name)
+                    if os.path.exists(direct_path):
+                        return direct_path
+        except (PermissionError, OSError):
+            pass
+        
+        return None
+    
     def execute(self, context):
         prefs = context.preferences.addons[__package__].preferences
         
-        # Common FreeCAD installation paths
-        common_paths = [
-            r"C:\Program Files\FreeCAD 0.21\bin\FreeCADCmd.exe",
-            r"C:\Program Files\FreeCAD 0.20\bin\FreeCADCmd.exe",
-            r"C:\Program Files\FreeCAD\bin\FreeCADCmd.exe",
-            r"C:\Program Files (x86)\FreeCAD\bin\FreeCADCmd.exe",
-            "/usr/bin/freecad",
-            "/usr/bin/freecadcmd",
-            "/usr/local/bin/freecad",
-            "/Applications/FreeCAD.app/Contents/MacOS/FreeCAD",
-        ]
+        print("ApexCad: Searching for FreeCAD installation...")
         
-        # Check PATH environment
-        try:
-            result = subprocess.run(
-                ["where" if os.name == 'nt' else "which", "freecadcmd" if os.name == 'nt' else "freecad"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                path = result.stdout.strip().split('\n')[0]
+        # Windows-specific detection
+        if os.name == 'nt':
+            # Try PATH environment first
+            try:
+                result = subprocess.run(
+                    ["where", "FreeCADCmd.exe"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    path = result.stdout.strip().split('\n')[0]
+                    if os.path.exists(path):
+                        prefs.freecad_path = path
+                        self.report({'INFO'}, f"FreeCAD found in PATH: {path}")
+                        print(f"ApexCad: Found FreeCAD at {path}")
+                        return {'FINISHED'}
+            except:
+                pass
+            
+            # Search in Program Files
+            program_files_paths = [
+                r"C:\Program Files",
+                r"C:\Program Files (x86)",
+            ]
+            
+            for base_path in program_files_paths:
+                found_path = self.search_program_files(base_path, "FreeCADCmd.exe")
+                if found_path:
+                    prefs.freecad_path = found_path
+                    self.report({'INFO'}, f"FreeCAD found: {found_path}")
+                    print(f"ApexCad: Found FreeCAD at {found_path}")
+                    return {'FINISHED'}
+            
+            # Specific common paths as fallback
+            common_paths = [
+                r"C:\Program Files\FreeCAD 0.21\bin\FreeCADCmd.exe",
+                r"C:\Program Files\FreeCAD 0.22\bin\FreeCADCmd.exe",
+                r"C:\Program Files\FreeCAD 0.20\bin\FreeCADCmd.exe",
+                r"C:\Program Files\FreeCAD 1.0\bin\FreeCADCmd.exe",
+                r"C:\Program Files\FreeCAD\bin\FreeCADCmd.exe",
+                r"C:\Program Files (x86)\FreeCAD\bin\FreeCADCmd.exe",
+            ]
+            
+            for path in common_paths:
                 if os.path.exists(path):
                     prefs.freecad_path = path
                     self.report({'INFO'}, f"FreeCAD found: {path}")
+                    print(f"ApexCad: Found FreeCAD at {path}")
                     return {'FINISHED'}
-        except:
-            pass
         
-        # Check common installation paths
-        for path in common_paths:
-            if os.path.exists(path):
-                prefs.freecad_path = path
-                self.report({'INFO'}, f"FreeCAD found: {path}")
-                return {'FINISHED'}
+        # Linux/Mac detection
+        else:
+            # Try which/whereis
+            for cmd in ["freecad", "freecadcmd", "FreeCAD"]:
+                try:
+                    result = subprocess.run(
+                        ["which", cmd],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        path = result.stdout.strip()
+                        if os.path.exists(path):
+                            prefs.freecad_path = path
+                            self.report({'INFO'}, f"FreeCAD found: {path}")
+                            print(f"ApexCad: Found FreeCAD at {path}")
+                            return {'FINISHED'}
+                except:
+                    pass
+            
+            # Common Unix paths
+            common_paths = [
+                "/usr/bin/freecad",
+                "/usr/bin/freecadcmd",
+                "/usr/local/bin/freecad",
+                "/usr/local/bin/freecadcmd",
+                "/opt/freecad/bin/freecad",
+                "/Applications/FreeCAD.app/Contents/MacOS/FreeCAD",
+                "/Applications/FreeCAD.app/Contents/Resources/bin/FreeCAD",
+            ]
+            
+            for path in common_paths:
+                if os.path.exists(path):
+                    prefs.freecad_path = path
+                    self.report({'INFO'}, f"FreeCAD found: {path}")
+                    print(f"ApexCad: Found FreeCAD at {path}")
+                    return {'FINISHED'}
         
+        # Not found
+        print("ApexCad: FreeCAD not found in common locations")
         self.report({'WARNING'}, "FreeCAD not found. Please set path manually.")
         return {'CANCELLED'}
 

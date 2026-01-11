@@ -58,6 +58,15 @@ def register():
     # Register file import menu
     bpy.types.TOPBAR_MT_file_import.append(ui.menu_func_import)
     
+    # Auto-detect FreeCAD on first registration
+    try:
+        prefs = bpy.context.preferences.addons[__package__].preferences
+        if prefs.auto_detect_freecad and not prefs.freecad_path:
+            print("ApexCad: Auto-detecting FreeCAD installation...")
+            bpy.ops.apexcad.detect_freecad()
+    except:
+        pass
+    
     print("ApexCadImporter: Successfully registered")
 
 
